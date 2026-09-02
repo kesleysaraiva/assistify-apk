@@ -1,0 +1,61 @@
+name: Build Assistify APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Create Android platform if missing
+        run: |
+          if [ ! -d android ]; then
+            flutter create . --project-name assistify --org com.assistify --platforms=android
+          fi
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Allow cleartext HTTP
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
+              sed -i 's/<application /<application android:usesCleartextTraffic="true" /' "$MANIFEST"
+            fi
+            if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+              sed -i 's/<manifest /<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android" /' "$MANIFEST" || true
+              # inject permission after manifest tag if missing
+              python3 - <<'PY'
+import re
+path = "android/app/src/main/AndroidManifest.xml"
+text = open(path).read()
+if "android.permission.INTERNET" not in text:
+    text = text.replace(
+        "<application",
+        '    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application',
+        1
+    )
+    open(path,"w").write(text)
+print("manifest ok")
+PY
+            fi
+          fi
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: assistify-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
