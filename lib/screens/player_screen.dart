@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_player/video_player.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
@@ -26,48 +25,56 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late final Player _player;
-  late final VideoController _controller;
-  bool _fav = false;
-  bool _error = false;
-  String? _errorMsg;
+  VideoPlayerController? _controller;
+  bool _loading = true;
+  String? _error;
+  bool _showControls = true;
 
   @override
   void initState() {
     super.initState();
-    _fav = widget.isFavorite;
-    MediaKit.ensureInitialized();
-    _player = Player();
-    _controller = VideoController(_player);
-    _start();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+      DeviceOrientation.portraitUp,
+    ]);
+    _init();
   }
 
-  Future<void> _start() async {
+  Future<void> _init() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      // Prefer m3u8; fallback handled by media_kit
-      await _player.open(Media(widget.url));
-    } catch (e) {
-      // try .ts variant for live
-      if (widget.channel.type == 'live') {
-        try {
-          final tsUrl = widget.url.replaceAll('.m3u8', '.ts');
-          await _player.open(Media(tsUrl));
-          return;
-        } catch (_) {}
-      }
-      setState(() {
-        _error = true;
-        _errorMsg = e.toString();
+      final c = VideoPlayerController.networkUrl(
+        Uri.parse(widget.url),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      );
+      _controller = c;
+      await c.initialize();
+      await c.play();
+      c.addListener(() {
+        if (mounted) setState(() {});
       });
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Não foi possível reproduzir.\nTente outro conteúdo.';
+        });
+      }
     }
   }
 
   @override
   void dispose() {
-    _player.dispose();
+    _controller?.dispose();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
@@ -76,68 +83,130 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = _controller;
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: Row(
+      body: SafeArea(
+        child: Stack(
           children: [
-            Image.asset('assets/logo-icon.png', height: 28),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                widget.title,
-                style: const TextStyle(fontSize: 16),
-                overflow: TextOverflow.ellipsis,
-              ),
+            Center(
+              child: _loading
+                  ? const CircularProgressIndicator(color: AppColors.purple)
+                  : _error != null
+                      ? Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton(
+                                onPressed: _init,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppColors.purple,
+                                ),
+                                child: const Text('Tentar de novo'),
+                              ),
+                            ],
+                          ),
+                        )
+                      : (c != null && c.value.isInitialized)
+                          ? GestureDetector(
+                              onTap: () => setState(
+                                  () => _showControls = !_showControls),
+                              child: AspectRatio(
+                                aspectRatio: c.value.aspectRatio == 0
+                                    ? 16 / 9
+                                    : c.value.aspectRatio,
+                                child: VideoPlayer(c),
+                              ),
+                            )
+                          : const SizedBox.shrink(),
             ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(
-              _fav ? Icons.favorite : Icons.favorite_border,
-              color: _fav ? AppColors.purple : Colors.white,
-            ),
-            onPressed: () {
-              widget.onToggleFavorite();
-              setState(() => _fav = !_fav);
-            },
-          ),
-        ],
-      ),
-      body: _error
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.error_outline, color: AppColors.danger, size: 48),
-                    const SizedBox(height: 16),
-                    const Text('Não foi possível reproduzir', style: TextStyle(fontSize: 16)),
-                    if (_errorMsg != null) ...[
-                      const SizedBox(height: 8),
-                      Text(_errorMsg!, style: const TextStyle(color: AppColors.textMuted, fontSize: 12), textAlign: TextAlign.center),
+            if (_showControls)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  color: Colors.black54,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                      Image.asset(
+                        'assets/logo-icon.png',
+                        width: 28,
+                        height: 28,
+                        errorBuilder: (_, __, ___) => const SizedBox(width: 28),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          widget.isFavorite
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          color: widget.isFavorite
+                              ? AppColors.purple
+                              : Colors.white,
+                        ),
+                        onPressed: widget.onToggleFavorite,
+                      ),
                     ],
-                    const SizedBox(height: 20),
-                    ElevatedButton(
+                  ),
+                ),
+              ),
+            if (_showControls &&
+                c != null &&
+                c.value.isInitialized &&
+                _error == null)
+              Positioned(
+                bottom: 12,
+                left: 12,
+                right: 12,
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        c.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                        color: Colors.white,
+                        size: 32,
+                      ),
                       onPressed: () {
-                        setState(() => _error = false);
-                        _start();
+                        setState(() {
+                          if (c.value.isPlaying) {
+                            c.pause();
+                          } else {
+                            c.play();
+                          }
+                        });
                       },
-                      child: const Text('Tentar novamente'),
                     ),
                   ],
                 ),
               ),
-            )
-          : Center(
-              child: Video(
-                controller: _controller,
-                controls: MaterialVideoControls,
-              ),
-            ),
+          ],
+        ),
+      ),
     );
   }
 }
