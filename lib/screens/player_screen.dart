@@ -1,6 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:video_player/video_player.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
@@ -25,17 +26,10 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  VideoPlayerController? _controller;
+  late final WebViewController _controller;
   bool _loading = true;
   String? _error;
-  bool _showControls = true;
   int _urlIndex = 0;
-
-  static const _headers = {
-    'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
-    'Accept': '*/*',
-    'Connection': 'keep-alive',
-  };
 
   @override
   void initState() {
@@ -45,53 +39,139 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.landscapeRight,
       DeviceOrientation.portraitUp,
     ]);
-    _tryNext();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.black)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            if (mounted) setState(() => _loading = false);
+          },
+          onWebResourceError: (e) {
+            // ignore individual resource errors; JS handles fallback
+          },
+        ),
+      )
+      ..addJavaScriptChannel(
+        'Assistify',
+        onMessageReceived: (msg) {
+          if (msg.message == 'error') {
+            _tryNext();
+          } else if (msg.message == 'playing') {
+            if (mounted) {
+              setState(() {
+                _loading = false;
+                _error = null;
+              });
+            }
+          }
+        },
+      );
+    _loadCurrent();
   }
 
-  Future<void> _tryNext() async {
-    if (_urlIndex >= widget.urls.length) {
+  void _tryNext() {
+    if (_urlIndex + 1 < widget.urls.length) {
+      setState(() {
+        _urlIndex++;
+        _loading = true;
+        _error = null;
+      });
+      _loadCurrent();
+    } else {
       if (mounted) {
         setState(() {
           _loading = false;
           _error = 'Não foi possível reproduzir.\nTente outro conteúdo.';
         });
       }
-      return;
-    }
-    final url = widget.urls[_urlIndex];
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    await _controller?.dispose();
-    _controller = null;
-    try {
-      final c = VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        httpHeaders: _headers,
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-      );
-      _controller = c;
-      await c.initialize().timeout(const Duration(seconds: 20));
-      await c.play();
-      c.addListener(() {
-        if (mounted) setState(() {});
-      });
-      if (mounted) setState(() => _loading = false);
-    } catch (_) {
-      _urlIndex++;
-      await _tryNext();
     }
   }
 
+  void _loadCurrent() {
+    if (widget.urls.isEmpty) {
+      setState(() {
+        _loading = false;
+        _error = 'URL inválida';
+      });
+      return;
+    }
+    final url = widget.urls[_urlIndex];
+    final html = _buildHtml(url);
+    _controller.loadHtmlString(html, baseUrl: 'https://localhost/');
+  }
+
+  String _buildHtml(String streamUrl) {
+    final u = const JsonEncoder().convert(streamUrl);
+    return '''
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}
+  video{width:100%;height:100%;object-fit:contain;background:#000}
+  #msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    color:#aaa;font-family:sans-serif;font-size:14px;text-align:center;padding:20px}
+</style>
+</head>
+<body>
+<video id="v" controls autoplay playsinline></video>
+<div id="msg">Carregando…</div>
+<script>
+const url = $u;
+const video = document.getElementById('v');
+const msg = document.getElementById('msg');
+function ok(){ msg.style.display='none'; try{Assistify.postMessage('playing');}catch(e){} }
+function fail(){ try{Assistify.postMessage('error');}catch(e){} }
+video.addEventListener('playing', ok);
+video.addEventListener('error', function(){ fail(); });
+
+function tryNative(){
+  video.src = url;
+  video.play().then(ok).catch(function(){ fail(); });
+}
+
+if (/\\.m3u8(\\?|\$)/i.test(url) && window.Hls && Hls.isSupported()) {
+  var hls = new Hls({enableWorker:true, xhrSetup:function(xhr){try{xhr.withCredentials=false;}catch(e){}}});
+  hls.loadSource(url);
+  hls.attachMedia(video);
+  hls.on(Hls.Events.MANIFEST_PARSED, function(){ video.play().then(ok).catch(fail); });
+  hls.on(Hls.Events.ERROR, function(_, d){ if(d && d.fatal) fail(); });
+  setTimeout(function(){ if(msg.style.display!=='none') fail(); }, 15000);
+} else if (/\\.ts(\\?|\$)/i.test(url) && window.mpegts && mpegts.getFeatureList && mpegts.getFeatureList().mseLivePlayback) {
+  try {
+    var p = mpegts.createPlayer({type:'mse', isLive:true, url:url}, {enableWorker:true});
+    p.attachMediaElement(video);
+    p.load();
+    p.on(mpegts.Events.ERROR, function(){ fail(); });
+    p.play().then(ok).catch(fail);
+    setTimeout(function(){ if(msg.style.display!=='none') fail(); }, 15000);
+  } catch(e) { tryNative(); }
+} else {
+  tryNative();
+  setTimeout(function(){ if(msg.style.display!=='none' && video.readyState < 2) fail(); }, 15000);
+}
+</script>
+</body>
+</html>
+''';
+  }
+
   Future<void> _retry() async {
-    _urlIndex = 0;
-    await _tryNext();
+    setState(() {
+      _urlIndex = 0;
+      _loading = true;
+      _error = null;
+    });
+    _loadCurrent();
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.landscapeLeft,
@@ -102,132 +182,87 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = _controller;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
-            Center(
-              child: _loading
-                  ? Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircularProgressIndicator(color: AppColors.purple),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Tentando ${_urlIndex + 1}/${widget.urls.length}...',
-                          style: const TextStyle(color: Colors.white54, fontSize: 12),
-                        ),
-                      ],
-                    )
-                  : _error != null
-                      ? Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _error!,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              const SizedBox(height: 16),
-                              FilledButton(
-                                onPressed: _retry,
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: AppColors.purple,
-                                ),
-                                child: const Text('Tentar de novo'),
-                              ),
-                            ],
-                          ),
-                        )
-                      : (c != null && c.value.isInitialized)
-                          ? GestureDetector(
-                              onTap: () =>
-                                  setState(() => _showControls = !_showControls),
-                              child: AspectRatio(
-                                aspectRatio: c.value.aspectRatio == 0
-                                    ? 16 / 9
-                                    : c.value.aspectRatio,
-                                child: VideoPlayer(c),
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-            ),
-            if (_showControls)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  color: Colors.black54,
-                  child: Row(
+            if (_error == null)
+              Positioned.fill(child: WebViewWidget(controller: _controller)),
+            if (_loading)
+              const Center(
+                child: CircularProgressIndicator(color: AppColors.purple),
+              ),
+            if (_error != null)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.of(context).pop(),
+                      Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70),
                       ),
-                      Image.asset(
-                        'assets/logo-icon.png',
-                        width: 28,
-                        height: 28,
-                        errorBuilder: (_, __, ___) => const SizedBox(width: 28),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      const SizedBox(height: 16),
+                      FilledButton(
+                        onPressed: _retry,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.purple,
                         ),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          widget.isFavorite
-                              ? Icons.favorite
-                              : Icons.favorite_border,
-                          color: widget.isFavorite
-                              ? AppColors.purple
-                              : Colors.white,
-                        ),
-                        onPressed: widget.onToggleFavorite,
+                        child: const Text('Tentar de novo'),
                       ),
                     ],
                   ),
                 ),
               ),
-            if (_showControls &&
-                c != null &&
-                c.value.isInitialized &&
-                _error == null)
-              Positioned(
-                bottom: 12,
-                left: 12,
-                right: 12,
-                child: IconButton(
-                  icon: Icon(
-                    c.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white,
-                    size: 36,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      if (c.value.isPlaying) {
-                        c.pause();
-                      } else {
-                        c.play();
-                      }
-                    });
-                  },
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                color: Colors.black54,
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    Image.asset(
+                      'assets/logo-icon.png',
+                      width: 26,
+                      height: 26,
+                      errorBuilder: (_, __, ___) => const SizedBox(width: 26),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        widget.isFavorite
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: widget.isFavorite
+                            ? AppColors.purple
+                            : Colors.white,
+                      ),
+                      onPressed: widget.onToggleFavorite,
+                    ),
+                  ],
                 ),
               ),
+            ),
           ],
         ),
       ),
