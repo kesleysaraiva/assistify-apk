@@ -28,7 +28,7 @@ jobs:
             flutter create . --project-name assistify --org com.assistify --platforms=android
           fi
 
-      - name: Patch Android (HTTP cleartext + nome + icon)
+      - name: Patch Android HTTP + nome
         run: |
           set -e
           for f in android/app/build.gradle android/app/build.gradle.kts; do
@@ -38,8 +38,6 @@ jobs:
               sed -i 's/flutter.targetSdkVersion/34/g' "$f"
             fi
           done
-
-          # Network security: permitir HTTP nos streams
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/network_security_config.xml << 'XML'
           <?xml version="1.0" encoding="utf-8"?>
@@ -51,35 +49,24 @@ jobs:
               </base-config>
           </network-security-config>
           XML
-
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if [ -f "$MANIFEST" ]; then
-            # cleartext + networkSecurityConfig on <application>
             if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
               sed -i 's/<application /<application android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml\/network_security_config" /' "$MANIFEST"
             else
               grep -q 'networkSecurityConfig' "$MANIFEST" || sed -i 's/usesCleartextTraffic="true"/usesCleartextTraffic="true" android:networkSecurityConfig="@xml\/network_security_config"/' "$MANIFEST"
             fi
             grep -q 'android.permission.INTERNET' "$MANIFEST" || sed -i 's|<application|    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application|' "$MANIFEST"
-            # App label
             sed -i 's/android:label="[^"]*"/android:label="Assistify"/' "$MANIFEST"
           fi
-
-          # strings.xml label
-          for s in android/app/src/main/res/values/strings.xml; do
-            if [ -f "$s" ]; then
-              sed -i 's/<string name="app_name">[^<]*/<string name="app_name">Assistify/' "$s" || true
-            else
-              mkdir -p android/app/src/main/res/values
-              echo '<resources><string name="app_name">Assistify</string></resources>' > "$s"
-            fi
-          done
+          mkdir -p android/app/src/main/res/values
+          echo '<resources><string name="app_name">Assistify</string></resources>' > android/app/src/main/res/values/strings.xml
 
       - name: Dependencies
         run: flutter pub get
 
-      - name: App icon
-        run: dart run flutter_launcher_icons || true
+      - name: App icon (com padding, sem zoom)
+        run: dart run flutter_launcher_icons
 
       - name: Build APK
         run: flutter build apk --release
