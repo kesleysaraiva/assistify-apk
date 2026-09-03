@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:better_player/better_player.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
-/// Player IPTV com media_kit (libmpv) — suporta HLS, TS, HTTP, MP4.
 class PlayerScreen extends StatefulWidget {
   final String title;
   final List<String> urls;
@@ -27,61 +25,35 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late final Player _player;
-  late final VideoController _videoController;
+  BetterPlayerController? _controller;
   bool _loading = true;
   String? _error;
   int _urlIndex = 0;
-  bool _showControls = true;
   bool _disposed = false;
-  bool _isPlaying = false;
+
+  // Headers que o APK antigo e a maioria dos players IPTV usam
+  static const Map<String, String> _headers = {
+    'User-Agent':
+        'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept': '*/*',
+    'Connection': 'keep-alive',
+    'Accept-Encoding': 'identity',
+  };
 
   @override
   void initState() {
     super.initState();
-    MediaKit.ensureInitialized();
-
-    _player = Player(
-      configuration: const PlayerConfiguration(
-        bufferSize: 32 * 1024 * 1024,
-        title: 'Assistify',
-      ),
-    );
-    _videoController = VideoController(_player);
-
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
       DeviceOrientation.portraitUp,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-
-    _player.stream.error.listen((event) {
-      if (_disposed || !mounted) return;
-      _onError();
-    });
-
-    _player.stream.playing.listen((playing) {
-      if (_disposed || !mounted) return;
-      setState(() {
-        _isPlaying = playing;
-        if (playing) _loading = false;
-      });
-    });
-
-    _player.stream.buffering.listen((buffering) {
-      if (_disposed || !mounted) return;
-      if (!buffering && _player.state.playing) {
-        setState(() => _loading = false);
-      }
-    });
-
     _start();
   }
 
   Future<void> _start() async {
     if (widget.urls.isEmpty) {
-      if (!mounted) return;
       setState(() {
         _loading = false;
         _error = 'URL inválida';
@@ -99,28 +71,78 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _error = null;
     });
 
+    // Dispose controller anterior
+    _controller?.dispose(forceDispose: true);
+    _controller = null;
+
     try {
-      await _player.open(
-        Media(
-          url,
-          httpHeaders: {
-            'User-Agent':
-                'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-            'Accept': '*/*',
-            'Connection': 'keep-alive',
-          },
+      final dataSource = BetterPlayerDataSource(
+        BetterPlayerDataSourceType.network,
+        url,
+        headers: _headers,
+        liveStream: widget.channel.type == 'live',
+        bufferingConfiguration: const BetterPlayerBufferingConfiguration(
+          minBufferMs: 2000,
+          maxBufferMs: 30000,
+          bufferForPlaybackMs: 1000,
+          bufferForPlaybackAfterRebufferMs: 2000,
         ),
-        play: true,
       );
 
-      // Se em 20s não começar a tocar, tenta próxima URL
-      Future.delayed(const Duration(seconds: 20), () {
+      final config = BetterPlayerConfiguration(
+        autoPlay: true,
+        fit: BoxFit.contain,
+        aspectRatio: 16 / 9,
+        handleLifecycle: true,
+        autoDetectFullscreenDeviceOrientation: true,
+        controlsConfiguration: const BetterPlayerControlsConfiguration(
+          enableSkips: false,
+          enableOverflowMenu: false,
+          enablePlaybackSpeed: false,
+          enableQualities: false,
+          enableSubtitles: false,
+          enableAudioTracks: false,
+          controlBarColor: Colors.black54,
+          iconsColor: Colors.white,
+          progressBarPlayedColor: AppColors.purple,
+          progressBarHandleColor: AppColors.purple,
+          loadingColor: AppColors.purple,
+        ),
+        errorBuilder: (context, errorMessage) {
+          return _buildErrorWidget(errorMessage ?? 'Erro ao reproduzir');
+        },
+      );
+
+      final controller = BetterPlayerController(config);
+      await controller.setupDataSource(dataSource);
+
+      controller.addEventsListener((event) {
         if (_disposed || !mounted) return;
-        if (_loading && !_player.state.playing) {
+        if (event.betterPlayerEventType == BetterPlayerEventType.initialized ||
+            event.betterPlayerEventType == BetterPlayerEventType.play) {
+          setState(() => _loading = false);
+        }
+        if (event.betterPlayerEventType == BetterPlayerEventType.exception) {
           _onError();
         }
       });
-    } catch (_) {
+
+      if (!mounted || _disposed) {
+        controller.dispose(forceDispose: true);
+        return;
+      }
+
+      setState(() {
+        _controller = controller;
+        _loading = false;
+      });
+
+      // Timeout de segurança
+      Future.delayed(const Duration(seconds: 25), () {
+        if (_disposed || !mounted) return;
+        if (_loading) _onError();
+      });
+    } catch (e) {
       if (!_disposed && mounted) _onError();
     }
   }
@@ -143,20 +165,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await _start();
   }
 
-  Future<void> _togglePlay() async {
-    await _player.playOrPause();
+  Widget _buildErrorWidget(String message) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: _retry,
+              style: FilledButton.styleFrom(backgroundColor: AppColors.purple),
+              child: const Text('Tentar de novo'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _disposed = true;
-    _player.dispose();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _controller?.dispose(forceDispose: true);
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -167,116 +209,58 @@ class _PlayerScreenState extends State<PlayerScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            // Vídeo
-            if (_error == null)
+            if (_controller != null && _error == null)
               Positioned.fill(
-                child: GestureDetector(
-                  onTap: () => setState(() => _showControls = !_showControls),
-                  child: Video(
-                    controller: _videoController,
-                    controls: NoVideoControls,
-                    fill: Colors.black,
-                  ),
-                ),
+                child: BetterPlayer(controller: _controller!),
               ),
-
-            // Loading
-            if (_loading && _error == null)
-              Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+            if (_loading)
+              const Center(
+                child: CircularProgressIndicator(color: AppColors.purple),
+              ),
+            if (_error != null) _buildErrorWidget(_error!),
+            // Barra superior
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                color: Colors.black54,
+                child: Row(
                   children: [
-                    const CircularProgressIndicator(color: AppColors.purple),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Tentando ${_urlIndex + 1}/${widget.urls.length}...',
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    Image.asset(
+                      'assets/logo-icon.png',
+                      width: 26,
+                      height: 26,
+                      errorBuilder: (_, __, ___) => const SizedBox(width: 26),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        widget.isFavorite ? Icons.favorite : Icons.favorite_border,
+                        color: widget.isFavorite ? AppColors.purple : Colors.white,
+                      ),
+                      onPressed: widget.onToggleFavorite,
                     ),
                   ],
                 ),
               ),
-
-            // Erro
-            if (_error != null)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed: _retry,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.purple,
-                        ),
-                        child: const Text('Tentar de novo'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // Controles
-            if (_showControls)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  color: Colors.black54,
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                      Image.asset(
-                        'assets/logo-icon.png',
-                        width: 26,
-                        height: 26,
-                        errorBuilder: (_, __, ___) => const SizedBox(width: 26),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          _isPlaying ? Icons.pause : Icons.play_arrow,
-                          color: Colors.white,
-                        ),
-                        onPressed: _togglePlay,
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          widget.isFavorite
-                              ? Icons.favorite
-                              : Icons.favorite_border,
-                          color: widget.isFavorite
-                              ? AppColors.purple
-                              : Colors.white,
-                        ),
-                        onPressed: widget.onToggleFavorite,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            ),
           ],
         ),
       ),
