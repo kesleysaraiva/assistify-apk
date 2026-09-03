@@ -37,6 +37,9 @@ jobs:
               sed -i 's/flutter.compileSdkVersion/34/g' "$f"
               sed -i 's/flutter.minSdkVersion/24/g' "$f"
               sed -i 's/flutter.targetSdkVersion/34/g' "$f"
+              # force minSdk 24 if still variable
+              sed -i 's/minSdk .*/minSdk 24/' "$f" || true
+              sed -i 's/minSdkVersion .*/minSdkVersion 24/' "$f" || true
             fi
           done
 
@@ -50,6 +53,9 @@ jobs:
                       <certificates src="user" />
                   </trust-anchors>
               </base-config>
+              <domain-config cleartextTrafficPermitted="true">
+                  <domain includeSubdomains="true">localhost</domain>
+              </domain-config>
           </network-security-config>
           XML
 
@@ -59,6 +65,7 @@ jobs:
             sed -i 's/ android:networkSecurityConfig="[^"]*"//g' "$MANIFEST"
             sed -i 's/<application /<application android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml\/network_security_config" /' "$MANIFEST"
 
+            # Always ensure INTERNET permission
             if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
               sed -i 's|<application|    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <application|' "$MANIFEST"
             fi
@@ -69,8 +76,10 @@ jobs:
           mkdir -p android/app/src/main/res/values
           echo '<resources><string name="app_name">Assistify</string></resources>' > android/app/src/main/res/values/strings.xml
 
-          echo "=== application tag ==="
-          grep -n "<application" "$MANIFEST" || true
+          echo "=== Manifest application tag ==="
+          grep -n "application\|usesCleartext\|INTERNET\|networkSecurity" "$MANIFEST" || true
+          echo "=== network_security_config ==="
+          cat android/app/src/main/res/xml/network_security_config.xml
 
       - name: Dependencies
         run: flutter pub get
