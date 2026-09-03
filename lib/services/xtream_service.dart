@@ -97,6 +97,44 @@ class XtreamService {
         .toList();
   }
 
+
+  Future<SeriesInfo> getSeriesInfo(Channel series) async {
+    final data = await _get('get_series_info&series_id=${series.streamId}');
+    if (data is! Map) {
+      return SeriesInfo(series: series, seasons: []);
+    }
+    final map = Map<String, dynamic>.from(data);
+    final episodesRaw = map['episodes'];
+    final seasons = <Season>[];
+    if (episodesRaw is Map) {
+      final keys = episodesRaw.keys.map((e) => e.toString()).toList()
+        ..sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+      for (final key in keys) {
+        final list = episodesRaw[key];
+        if (list is! List) continue;
+        final eps = <Episode>[];
+        for (final e in list) {
+          if (e is! Map) continue;
+          final m = Map<String, dynamic>.from(e);
+          final id = '${m['id'] ?? ''}';
+          if (id.isEmpty) continue;
+          final num = m['episode_num']?.toString() ?? id;
+          final title = (m['title'] as String?)?.trim();
+          eps.add(Episode(
+            id: id,
+            title: title != null && title.isNotEmpty ? 'E$num — $title' : 'Episódio $num',
+            containerExtension: (m['container_extension'] as String?) ?? 'mp4',
+            plot: m['plot'] as String?,
+          ));
+        }
+        if (eps.isNotEmpty) {
+          seasons.add(Season(number: key, episodes: eps));
+        }
+      }
+    }
+    return SeriesInfo(series: series, seasons: seasons);
+  }
+
   /// Stream URL builders (Xtream standard)
   String liveStreamUrl(String streamId) {
     final c = _creds!;
@@ -108,14 +146,56 @@ class XtreamService {
     return '${c.baseUrl}/live/${c.username}/${c.password}/$streamId.m3u8';
   }
 
+  List<String> liveUrls(String streamId) {
+    final c = _creds!;
+    final b = c.baseUrl;
+    final u = c.username;
+    final p = c.password;
+    return [
+      '$b/live/$u/$p/$streamId.m3u8',
+      '$b/live/$u/$p/$streamId.ts',
+      '$b/live/$u/$p/$streamId',
+    ];
+  }
+
   String vodStreamUrl(String streamId, {String ext = 'mp4'}) {
     final c = _creds!;
     return '${c.baseUrl}/movie/${c.username}/${c.password}/$streamId.$ext';
   }
 
+  List<String> vodUrls(String streamId, {String? ext}) {
+    final c = _creds!;
+    final b = c.baseUrl;
+    final u = c.username;
+    final p = c.password;
+    final e = (ext == null || ext.isEmpty) ? 'mp4' : ext;
+    final list = <String>[
+      '$b/movie/$u/$p/$streamId.$e',
+    ];
+    for (final x in ['mp4', 'mkv', 'avi', 'ts', 'm3u8']) {
+      final url = '$b/movie/$u/$p/$streamId.$x';
+      if (!list.contains(url)) list.add(url);
+    }
+    return list;
+  }
+
   String seriesStreamUrl(String episodeId, {String ext = 'mp4'}) {
     final c = _creds!;
     return '${c.baseUrl}/series/${c.username}/${c.password}/$episodeId.$ext';
+  }
+
+  List<String> seriesUrls(String episodeId, {String? ext}) {
+    final c = _creds!;
+    final b = c.baseUrl;
+    final u = c.username;
+    final p = c.password;
+    final e = (ext == null || ext.isEmpty) ? 'mp4' : ext;
+    final list = <String>['$b/series/$u/$p/$episodeId.$e'];
+    for (final x in ['mp4', 'mkv', 'ts', 'm3u8']) {
+      final url = '$b/series/$u/$p/$episodeId.$x';
+      if (!list.contains(url)) list.add(url);
+    }
+    return list;
   }
 
   Future<dynamic> _get(String action) async {
