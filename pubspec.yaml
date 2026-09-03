@@ -1,7 +1,7 @@
 name: assistify
-description: Assistify IPTV - Netflix style player with Xtream Codes support
+description: Assistify IPTV
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.2+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -13,6 +13,7 @@ dependencies:
   shared_preferences: ^2.2.2
   cached_network_image: ^3.3.1
   video_player: ^2.9.1
+  webview_flutter: ^4.7.0
   google_fonts: ^6.1.0
 
 dev_dependencies:
@@ -27,6 +28,8 @@ flutter_launcher_icons:
   image_path: "assets/logo-icon.png"
   adaptive_icon_background: "#0A0A0A"
   adaptive_icon_foreground: "assets/logo-icon.png"
+  adaptive_icon_foreground_inset: 32
+  min_sdk_android: 24
 
 flutter:
   uses-material-design: true
