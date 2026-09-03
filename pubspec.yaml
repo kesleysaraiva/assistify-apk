@@ -1,7 +1,7 @@
 name: assistify
 description: Assistify IPTV
 publish_to: 'none'
-version: 1.0.5+6
+version: 1.0.6+7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -27,7 +27,7 @@ flutter_launcher_icons:
   image_path: "assets/logo-icon.png"
   adaptive_icon_background: "#0A0A0A"
   adaptive_icon_foreground: "assets/logo-icon.png"
-  adaptive_icon_foreground_inset: 32
+  adaptive_icon_foreground_inset: 48
   min_sdk_android: 24
 
 flutter:
