@@ -105,30 +105,138 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {});
   }
 
-  void _openChannel(Channel ch) {
-    String url;
-    if (ch.type == 'live') {
-      url = widget.xtream.liveStreamUrlM3u8(ch.streamId);
-    } else if (ch.type == 'vod') {
-      url = widget.xtream.vodStreamUrl(ch.streamId, ext: ch.containerExtension ?? 'mp4');
-    } else {
-      // series – open would need episode picker; for now try as vod-like
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Séries: selecione episódio em breve')),
-      );
+  Future<void> _openChannel(Channel ch) async {
+    if (ch.type == 'series') {
+      await _openSeries(ch);
       return;
     }
+    List<String> urls;
+    if (ch.type == 'live') {
+      urls = widget.xtream.liveUrls(ch.streamId);
+    } else {
+      urls = widget.xtream.vodUrls(ch.streamId, ext: ch.containerExtension);
+    }
+    if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           title: ch.name,
-          url: url,
+          urls: urls,
           channel: ch,
           isFavorite: _favs.contains(ch.id),
           onToggleFavorite: () => _toggleFav(ch),
         ),
       ),
     );
+  }
+
+  Future<void> _openSeries(Channel ch) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: AppColors.purple)),
+    );
+    try {
+      final info = await widget.xtream.getSeriesInfo(ch);
+      if (!mounted) return;
+      Navigator.of(context).pop(); // close loading
+      if (info.seasons.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Nenhum episódio encontrado')),
+        );
+        return;
+      }
+      await showModalBottomSheet(
+        context: context,
+        backgroundColor: AppColors.bgSecondary,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (ctx) {
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.7,
+            minChildSize: 0.4,
+            maxChildSize: 0.95,
+            builder: (_, scrollCtrl) {
+              return ListView(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    ch.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  for (final season in info.seasons) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12, bottom: 6),
+                      child: Text(
+                        'Temporada ${season.number}',
+                        style: const TextStyle(
+                          color: AppColors.purpleLight,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    for (final ep in season.episodes)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          ep.title,
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                        ),
+                        trailing: const Icon(Icons.play_circle_fill, color: AppColors.purple),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          final urls = widget.xtream.seriesUrls(
+                            ep.id,
+                            ext: ep.containerExtension,
+                          );
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => PlayerScreen(
+                                title: '${ch.name} — ${ep.title}',
+                                urls: urls,
+                                channel: ch,
+                                isFavorite: _favs.contains(ch.id),
+                                onToggleFavorite: () => _toggleFav(ch),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ],
+              );
+            },
+          );
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao abrir série: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _logout() async {
