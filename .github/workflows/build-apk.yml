@@ -28,23 +28,44 @@ jobs:
             flutter create . --project-name assistify --org com.assistify --platforms=android
           fi
 
-      - name: Configure Android (minSdk + cleartext)
+      - name: Fix compileSdk minSdk manifest
         run: |
-          if [ -f android/app/build.gradle ]; then
-            sed -i 's/minSdkVersion .*/minSdkVersion 24/' android/app/build.gradle || true
-            sed -i 's/minSdk .*/minSdk 24/' android/app/build.gradle || true
+          set -e
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            if [ -f "$f" ]; then
+              sed -i 's/flutter.compileSdkVersion/34/g' "$f"
+              sed -i 's/flutter.minSdkVersion/24/g' "$f"
+              sed -i 's/flutter.targetSdkVersion/34/g' "$f"
+              sed -i 's/compileSdkVersion .*/compileSdkVersion 34/' "$f" || true
+              sed -i 's/compileSdk = .*/compileSdk = 34/' "$f" || true
+              sed -i 's/minSdkVersion .*/minSdkVersion 24/' "$f" || true
+              sed -i 's/minSdk = .*/minSdk = 24/' "$f" || true
+              sed -i 's/targetSdkVersion .*/targetSdkVersion 34/' "$f" || true
+              sed -i 's/targetSdk = .*/targetSdk = 34/' "$f" || true
+              echo "patched $f"
+              cat "$f" | head -80
+            fi
+          done
+          if [ -f android/build.gradle ]; then
+            if ! grep -q 'compileSdkVersion 34' android/build.gradle; then
+              cat >> android/build.gradle << 'EOF'
+
+          subprojects { sub ->
+            sub.afterEvaluate {
+              if (sub.hasProperty('android')) {
+                sub.android {
+                  compileSdkVersion 34
+                }
+              }
+            }
+          }
+          EOF
+            fi
           fi
-          if [ -f android/app/build.gradle.kts ]; then
-            sed -i 's/minSdk = .*/minSdk = 24/' android/app/build.gradle.kts || true
-          fi
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          MANIFEST=android/app/src/main/AndroidManifest.xml
           if [ -f "$MANIFEST" ]; then
-            if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
-              sed -i 's/<application /<application android:usesCleartextTraffic="true" /' "$MANIFEST"
-            fi
-            if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
-              sed -i 's|<application|    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application|' "$MANIFEST"
-            fi
+            grep -q usesCleartextTraffic "$MANIFEST" || sed -i 's/<application /<application android:usesCleartextTraffic="true" /' "$MANIFEST"
+            grep -q android.permission.INTERNET "$MANIFEST" || sed -i 's|<application|    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application|' "$MANIFEST"
           fi
 
       - name: Dependencies
