@@ -25,29 +25,13 @@ jobs:
       - name: Dependencies
         run: flutter pub get
 
-      - name: Allow cleartext HTTP
+      - name: Allow cleartext HTTP and internet
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
-              sed -i 's/<application /<application android:usesCleartextTraffic="true" /' "$MANIFEST"
-            fi
+            sed -i 's/<application /<application android:usesCleartextTraffic="true" /' "$MANIFEST"
             if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
-              sed -i 's/<manifest /<manifest xmlns:android="http:\/\/schemas.android.com\/apk\/res\/android" /' "$MANIFEST" || true
-              # inject permission after manifest tag if missing
-              python3 - <<'PY'
-import re
-path = "android/app/src/main/AndroidManifest.xml"
-text = open(path).read()
-if "android.permission.INTERNET" not in text:
-    text = text.replace(
-        "<application",
-        '    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application',
-        1
-    )
-    open(path,"w").write(text)
-print("manifest ok")
-PY
+              sed -i 's|<application|    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application|' "$MANIFEST"
             fi
           fi
 
