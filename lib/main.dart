@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'theme/app_theme.dart';
 import 'services/xtream_service.dart';
 import 'services/storage_service.dart';
@@ -6,6 +7,7 @@ import 'screens/login_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   runApp(const AssistifyApp());
 }
 
