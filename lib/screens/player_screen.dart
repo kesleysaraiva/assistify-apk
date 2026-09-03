@@ -32,9 +32,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _urlIndex = 0;
 
   static const _headers = {
-    'User-Agent':
-        'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+    'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
     'Accept': '*/*',
+    'Connection': 'keep-alive',
   };
 
   @override
