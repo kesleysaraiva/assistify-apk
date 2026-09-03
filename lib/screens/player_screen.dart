@@ -6,7 +6,7 @@ import '../theme/app_theme.dart';
 
 class PlayerScreen extends StatefulWidget {
   final String title;
-  final String url;
+  final List<String> urls;
   final Channel channel;
   final bool isFavorite;
   final VoidCallback onToggleFavorite;
@@ -14,7 +14,7 @@ class PlayerScreen extends StatefulWidget {
   const PlayerScreen({
     super.key,
     required this.title,
-    required this.url,
+    required this.urls,
     required this.channel,
     required this.isFavorite,
     required this.onToggleFavorite,
@@ -29,6 +29,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _loading = true;
   String? _error;
   bool _showControls = true;
+  int _urlIndex = 0;
+
+  static const _headers = {
+    'User-Agent':
+        'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept': '*/*',
+  };
 
   @override
   void initState() {
@@ -38,36 +45,48 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.landscapeRight,
       DeviceOrientation.portraitUp,
     ]);
-    _init();
+    _tryNext();
   }
 
-  Future<void> _init() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final c = VideoPlayerController.networkUrl(
-        Uri.parse(widget.url),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-      );
-      _controller = c;
-      await c.initialize();
-      await c.play();
-      c.addListener(() {
-        if (mounted) setState(() {});
-      });
-      if (mounted) {
-        setState(() => _loading = false);
-      }
-    } catch (e) {
+  Future<void> _tryNext() async {
+    if (_urlIndex >= widget.urls.length) {
       if (mounted) {
         setState(() {
           _loading = false;
           _error = 'Não foi possível reproduzir.\nTente outro conteúdo.';
         });
       }
+      return;
     }
+    final url = widget.urls[_urlIndex];
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    await _controller?.dispose();
+    _controller = null;
+    try {
+      final c = VideoPlayerController.networkUrl(
+        Uri.parse(url),
+        httpHeaders: _headers,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      );
+      _controller = c;
+      await c.initialize().timeout(const Duration(seconds: 20));
+      await c.play();
+      c.addListener(() {
+        if (mounted) setState(() {});
+      });
+      if (mounted) setState(() => _loading = false);
+    } catch (_) {
+      _urlIndex++;
+      await _tryNext();
+    }
+  }
+
+  Future<void> _retry() async {
+    _urlIndex = 0;
+    await _tryNext();
   }
 
   @override
@@ -91,7 +110,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
           children: [
             Center(
               child: _loading
-                  ? const CircularProgressIndicator(color: AppColors.purple)
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(color: AppColors.purple),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Tentando ${_urlIndex + 1}/${widget.urls.length}...',
+                          style: const TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                      ],
+                    )
                   : _error != null
                       ? Padding(
                           padding: const EdgeInsets.all(24),
@@ -105,7 +134,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               ),
                               const SizedBox(height: 16),
                               FilledButton(
-                                onPressed: _init,
+                                onPressed: _retry,
                                 style: FilledButton.styleFrom(
                                   backgroundColor: AppColors.purple,
                                 ),
@@ -116,8 +145,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         )
                       : (c != null && c.value.isInitialized)
                           ? GestureDetector(
-                              onTap: () => setState(
-                                  () => _showControls = !_showControls),
+                              onTap: () =>
+                                  setState(() => _showControls = !_showControls),
                               child: AspectRatio(
                                 aspectRatio: c.value.aspectRatio == 0
                                     ? 16 / 9
@@ -133,8 +162,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 left: 0,
                 right: 0,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   color: Colors.black54,
                   child: Row(
                     children: [
@@ -183,25 +211,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 bottom: 12,
                 left: 12,
                 right: 12,
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        c.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                        color: Colors.white,
-                        size: 32,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          if (c.value.isPlaying) {
-                            c.pause();
-                          } else {
-                            c.play();
-                          }
-                        });
-                      },
-                    ),
-                  ],
+                child: IconButton(
+                  icon: Icon(
+                    c.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white,
+                    size: 36,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      if (c.value.isPlaying) {
+                        c.pause();
+                      } else {
+                        c.play();
+                      }
+                    });
+                  },
                 ),
               ),
           ],
