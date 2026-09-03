@@ -59,6 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _categories = await widget.xtream.getSeriesCategories();
         _channels = await widget.xtream.getSeries();
       } else {
+        // favorites – need all types cached; for simplicity reload live
         _categories = [];
         final live = await widget.xtream.getLiveStreams();
         _channels = live.where((c) => _favs.contains(c.id)).toList();
@@ -138,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final info = await widget.xtream.getSeriesInfo(ch);
       if (!mounted) return;
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(); // close loading
       if (info.seasons.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Nenhum episódio encontrado')),
@@ -454,3 +455,55 @@ class _ChannelCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  channel.logo != null && channel.logo!.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: channel.logo!,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => Container(color: AppColors.bgElevated),
+                          errorWidget: (_, __, ___) => _placeholder(),
+                        )
+                      : _placeholder(),
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: GestureDetector(
+                      onTap: onFav,
+                      child: Icon(
+                        isFav ? Icons.favorite : Icons.favorite_border,
+                        color: isFav ? AppColors.purple : Colors.white70,
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                channel.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder() {
+    return Container(
+      color: AppColors.bgElevated,
+      child: const Center(
+        child: Icon(Icons.play_circle_outline, color: AppColors.purple, size: 40),
+      ),
+    );
+  }
+}
