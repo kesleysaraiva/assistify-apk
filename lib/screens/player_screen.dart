@@ -4,7 +4,7 @@ import 'package:video_player/video_player.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
-/// Player based on ExoPlayer (same engine as the old working Assistify / vfire app).
+/// Player based on ExoPlayer (video_player on Android).
 class PlayerScreen extends StatefulWidget {
   final String title;
   final List<String> urls;
@@ -34,11 +34,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _disposed = false;
   bool _isPlaying = false;
 
+  // Headers típicos de apps IPTV / ExoPlayer
   static const _headers = {
     'User-Agent':
-        'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
     'Accept': '*/*',
     'Connection': 'keep-alive',
+    'Accept-Encoding': 'identity',
   };
 
   @override
@@ -77,6 +79,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } catch (_) {}
   }
 
+  VideoFormat? _hintFor(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('.m3u8') || u.endsWith('/m3u8') || u.contains('format=m3u8')) {
+      return VideoFormat.hls;
+    }
+    if (u.contains('.mpd')) return VideoFormat.dash;
+    if (u.contains('.mp4') || u.contains('.mkv') || u.contains('.avi')) {
+      return VideoFormat.other;
+    }
+    // live/ts often works better as HLS attempt first; fallback without hint
+    return null;
+  }
+
   Future<void> _openUrl(String url) async {
     if (_disposed || !mounted) return;
 
@@ -90,9 +105,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     VideoPlayerController? c;
     try {
+      final hint = _hintFor(url);
       c = VideoPlayerController.networkUrl(
         Uri.parse(url),
         httpHeaders: _headers,
+        formatHint: hint,
         videoPlayerOptions: VideoPlayerOptions(
           mixWithOthers: false,
           allowBackgroundPlayback: false,
@@ -102,30 +119,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
       c.addListener(() {
         if (_disposed || !mounted || _controller != c) return;
         final v = c!.value;
-
         if (v.hasError) {
           _onError();
           return;
         }
-
-        if (v.isInitialized && v.isPlaying) {
+        if (v.isInitialized && (v.isPlaying || v.position > Duration.zero)) {
           if (_loading || !_isPlaying) {
             setState(() {
               _loading = false;
-              _isPlaying = true;
+              _isPlaying = v.isPlaying;
             });
           }
         }
       });
 
-      await c.initialize().timeout(const Duration(seconds: 18));
+      await c.initialize().timeout(const Duration(seconds: 25));
       if (_disposed || !mounted) {
         await c.dispose();
         return;
       }
 
       await c.setLooping(false);
+      await c.setVolume(1.0);
       await c.play();
+
+      if (!mounted || _disposed) {
+        await c.dispose();
+        return;
+      }
 
       setState(() {
         _controller = c;
@@ -141,7 +162,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    Future.delayed(const Duration(seconds: 22), () {
+    Future.delayed(const Duration(seconds: 28), () {
       if (_disposed || !mounted) return;
       if (_loading && _controller == c) {
         _onError();
@@ -151,7 +172,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _onError() {
     if (_disposed || !mounted) return;
-
     if (_urlIndex + 1 < widget.urls.length) {
       _urlIndex++;
       _openUrl(widget.urls[_urlIndex]);
