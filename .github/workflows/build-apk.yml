@@ -41,7 +41,6 @@ jobs:
                   continue
               t = p.read_text(encoding="utf-8")
 
-              # SDK 35
               t = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35', t)
               t = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 35', t)
               t = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 35', t)
@@ -57,7 +56,6 @@ jobs:
               t = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 35', t)
               t = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 35', t)
 
-              # ndkVersion para media_kit
               if 'ndkVersion' not in t:
                   t = re.sub(r'(android\s*\{)', r'\1\n    ndkVersion = "25.1.8937393"\n', t, count=1)
 
@@ -67,7 +65,6 @@ jobs:
               p.write_text(t, encoding="utf-8")
               print(f"Patched {name}")
 
-          # network security (HTTP cleartext)
           xml_dir = Path("android/app/src/main/res/xml")
           xml_dir.mkdir(parents=True, exist_ok=True)
           (xml_dir / "network_security_config.xml").write_text(
@@ -82,7 +79,6 @@ jobs:
           </network-security-config>
           """, encoding="utf-8")
 
-          # Manifest
           man = Path("android/app/src/main/AndroidManifest.xml")
           t = man.read_text(encoding="utf-8")
           for perm in [
