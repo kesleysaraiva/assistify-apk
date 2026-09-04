@@ -126,6 +126,24 @@ jobs:
       - name: Dependencies
         run: flutter pub get
 
+      - name: Fix better_player namespace
+        run: |
+          set -e
+          # Corrige o erro de namespace do better_player (Flutter 3.24+)
+          find "$HOME/.pub-cache" -path "*better_player*/android/build.gradle" 2>/dev/null | while read -r f; do
+            if [ -f "$f" ] && ! grep -q "namespace" "$f"; then
+              sed -i '/android {/a\    namespace "com.jhomlala.better_player"' "$f"
+              echo "Fixed namespace in: $f"
+            fi
+          done
+          # Caso o pacote esteja em outro local
+          find . -path "*better_player*/android/build.gradle" 2>/dev/null | while read -r f; do
+            if [ -f "$f" ] && ! grep -q "namespace" "$f"; then
+              sed -i '/android {/a\    namespace "com.jhomlala.better_player"' "$f"
+              echo "Fixed namespace in: $f"
+            fi
+          done
+
       - name: App icon
         run: dart run flutter_launcher_icons || true
 
