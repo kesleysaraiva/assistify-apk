@@ -28,47 +28,44 @@ jobs:
             flutter create . --project-name assistify --org com.assistify --platforms=android
           fi
 
-      - name: Patch Android (SDK + cleartext + permissions)
+      - name: Patch Android for media_kit
         run: |
           set -e
-
           python3 << 'PY'
           from pathlib import Path
           import re
 
-          # --- Fix app build.gradle / build.gradle.kts ---
           for name in ["android/app/build.gradle", "android/app/build.gradle.kts"]:
               p = Path(name)
               if not p.exists():
                   continue
               t = p.read_text(encoding="utf-8")
-              # Force numeric SDK values (works for Groovy and Kotlin DSL)
+
+              # SDK
               t = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 34', t)
               t = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 34', t)
               t = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 34', t)
               t = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', t)
-
               t = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 24', t)
               t = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 24', t)
               t = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 24', t)
               t = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 24', t)
-
               t = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34', t)
               t = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 34', t)
               t = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 34', t)
               t = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', t)
 
-              # If compileSdk still missing entirely, inject inside android { }
+              # ndkVersion importante para media_kit
+              if 'ndkVersion' not in t:
+                  t = re.sub(r'(android\s*\{)', r'\1\n    ndkVersion = "25.1.8937393"\n', t, count=1)
+
               if 'compileSdk' not in t and 'compileSdkVersion' not in t:
                   t = re.sub(r'(android\s*\{)', r'\1\n    compileSdk = 34\n', t, count=1)
 
               p.write_text(t, encoding="utf-8")
-              print(f"=== {name} (sdk lines) ===")
-              for line in t.splitlines():
-                  if any(k in line for k in ("compileSdk", "minSdk", "targetSdk")):
-                      print(line)
+              print(f"Patched {name}")
 
-          # --- network_security_config ---
+          # network security
           xml_dir = Path("android/app/src/main/res/xml")
           xml_dir.mkdir(parents=True, exist_ok=True)
           (xml_dir / "network_security_config.xml").write_text(
@@ -81,11 +78,9 @@ jobs:
                   </trust-anchors>
               </base-config>
           </network-security-config>
-          """,
-              encoding="utf-8",
-          )
+          """, encoding="utf-8")
 
-          # --- Manifest ---
+          # Manifest
           man = Path("android/app/src/main/AndroidManifest.xml")
           t = man.read_text(encoding="utf-8")
           for perm in [
@@ -95,11 +90,7 @@ jobs:
               "android.permission.WAKE_LOCK",
           ]:
               if perm not in t:
-                  t = t.replace(
-                      "<application",
-                      f'    <uses-permission android:name="{perm}"/>\n    <application',
-                      1,
-                  )
+                  t = t.replace("<application", f'    <uses-permission android:name="{perm}"/>\n    <application', 1)
           t = re.sub(r'\s*android:usesCleartextTraffic="[^"]*"', "", t)
           t = re.sub(r'\s*android:networkSecurityConfig="[^"]*"', "", t)
           t = t.replace(
@@ -109,46 +100,22 @@ jobs:
           )
           t = re.sub(r'android:label="[^"]*"', 'android:label="Assistify"', t)
           man.write_text(t, encoding="utf-8")
-          print("=== manifest application line ===")
-          for line in t.splitlines():
-              if "application " in line or "INTERNET" in line:
-                  print(line[:200])
 
-          # strings
           values = Path("android/app/src/main/res/values")
           values.mkdir(parents=True, exist_ok=True)
           (values / "strings.xml").write_text(
-              '<resources><string name="app_name">Assistify</string></resources>\n',
-              encoding="utf-8",
-          )
+              '<resources><string name="app_name">Assistify</string></resources>\n', encoding="utf-8")
+          print("Android patch done")
           PY
 
       - name: Dependencies
         run: flutter pub get
 
-      - name: Fix better_player namespace
-        run: |
-          set -e
-          # Corrige o erro de namespace do better_player (Flutter 3.24+)
-          find "$HOME/.pub-cache" -path "*better_player*/android/build.gradle" 2>/dev/null | while read -r f; do
-            if [ -f "$f" ] && ! grep -q "namespace" "$f"; then
-              sed -i '/android {/a\    namespace "com.jhomlala.better_player"' "$f"
-              echo "Fixed namespace in: $f"
-            fi
-          done
-          # Caso o pacote esteja em outro local
-          find . -path "*better_player*/android/build.gradle" 2>/dev/null | while read -r f; do
-            if [ -f "$f" ] && ! grep -q "namespace" "$f"; then
-              sed -i '/android {/a\    namespace "com.jhomlala.better_player"' "$f"
-              echo "Fixed namespace in: $f"
-            fi
-          done
-
       - name: App icon
         run: dart run flutter_launcher_icons || true
 
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --verbose
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
