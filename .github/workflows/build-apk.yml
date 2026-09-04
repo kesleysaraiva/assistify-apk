@@ -28,7 +28,7 @@ jobs:
             flutter create . --project-name assistify --org com.assistify --platforms=android
           fi
 
-      - name: Patch Android for media_kit
+      - name: Patch Android
         run: |
           set -e
           python3 << 'PY'
@@ -40,30 +40,21 @@ jobs:
               if not p.exists():
                   continue
               t = p.read_text(encoding="utf-8")
-
-              t = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35', t)
-              t = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 35', t)
-              t = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 35', t)
-              t = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 35', t)
-
+              t = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 34', t)
+              t = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 34', t)
+              t = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 34', t)
+              t = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', t)
               t = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 24', t)
               t = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 24', t)
               t = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 24', t)
               t = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 24', t)
-
-              t = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 35', t)
-              t = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 35', t)
-              t = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 35', t)
-              t = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 35', t)
-
-              if 'ndkVersion' not in t:
-                  t = re.sub(r'(android\s*\{)', r'\1\n    ndkVersion = "25.1.8937393"\n', t, count=1)
-
+              t = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34', t)
+              t = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 34', t)
+              t = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 34', t)
+              t = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', t)
               if 'compileSdk' not in t and 'compileSdkVersion' not in t:
-                  t = re.sub(r'(android\s*\{)', r'\1\n    compileSdk = 35\n', t, count=1)
-
+                  t = re.sub(r'(android\s*\{)', r'\1\n    compileSdk = 34\n', t, count=1)
               p.write_text(t, encoding="utf-8")
-              print(f"Patched {name}")
 
           xml_dir = Path("android/app/src/main/res/xml")
           xml_dir.mkdir(parents=True, exist_ok=True)
@@ -88,11 +79,7 @@ jobs:
               "android.permission.WAKE_LOCK",
           ]:
               if perm not in t:
-                  t = t.replace(
-                      "<application",
-                      f'    <uses-permission android:name="{perm}"/>\n    <application',
-                      1,
-                  )
+                  t = t.replace("<application", f'    <uses-permission android:name="{perm}"/>\n    <application', 1)
           t = re.sub(r'\s*android:usesCleartextTraffic="[^"]*"', "", t)
           t = re.sub(r'\s*android:networkSecurityConfig="[^"]*"', "", t)
           t = t.replace(
@@ -106,10 +93,7 @@ jobs:
           values = Path("android/app/src/main/res/values")
           values.mkdir(parents=True, exist_ok=True)
           (values / "strings.xml").write_text(
-              '<resources><string name="app_name">Assistify</string></resources>\n',
-              encoding="utf-8",
-          )
-          print("Android patch done")
+              '<resources><string name="app_name">Assistify</string></resources>\n', encoding="utf-8")
           PY
 
       - name: Dependencies
