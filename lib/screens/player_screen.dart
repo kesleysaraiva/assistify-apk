@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_player/video_player.dart';
+import 'package:chewie/chewie.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
@@ -26,68 +26,34 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late final Player _player;
-  late final VideoController _videoController;
+  VideoPlayerController? _videoController;
+  ChewieController? _chewieController;
   bool _loading = true;
   String? _error;
   int _urlIndex = 0;
   bool _disposed = false;
-  bool _isPlaying = false;
 
   static const Map<String, String> _headers = {
     'User-Agent':
         'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
     'Accept': '*/*',
     'Connection': 'keep-alive',
-    'Accept-Encoding': 'identity',
   };
 
   @override
   void initState() {
     super.initState();
-    MediaKit.ensureInitialized();
-
-    _player = Player(
-      configuration: const PlayerConfiguration(
-        bufferSize: 64 * 1024 * 1024,
-        title: 'Assistify',
-      ),
-    );
-    _videoController = VideoController(_player);
-
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
       DeviceOrientation.portraitUp,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-
-    _player.stream.error.listen((_) {
-      if (_disposed || !mounted) return;
-      _onError();
-    });
-
-    _player.stream.playing.listen((playing) {
-      if (_disposed || !mounted) return;
-      setState(() {
-        _isPlaying = playing;
-        if (playing) _loading = false;
-      });
-    });
-
-    _player.stream.buffering.listen((buffering) {
-      if (_disposed || !mounted) return;
-      if (!buffering && _player.state.playing) {
-        setState(() => _loading = false);
-      }
-    });
-
     _start();
   }
 
   Future<void> _start() async {
     if (widget.urls.isEmpty) {
-      if (!mounted) return;
       setState(() {
         _loading = false;
         _error = 'URL inválida';
@@ -105,21 +71,63 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _error = null;
     });
 
+    await _disposePlayers();
+
     try {
-      await _player.open(
-        Media(url, httpHeaders: _headers),
-        play: true,
+      final controller = VideoPlayerController.networkUrl(
+        Uri.parse(url),
+        httpHeaders: _headers,
       );
 
-      Future.delayed(const Duration(seconds: 25), () {
-        if (_disposed || !mounted) return;
-        if (_loading && !_player.state.playing) {
-          _onError();
-        }
+      await controller.initialize().timeout(const Duration(seconds: 25));
+
+      if (_disposed || !mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      final chewie = ChewieController(
+        videoPlayerController: controller,
+        autoPlay: true,
+        looping: false,
+        allowFullScreen: true,
+        allowMuting: true,
+        showControls: true,
+        materialProgressColors: ChewieProgressColors(
+          playedColor: AppColors.purple,
+          handleColor: AppColors.purple,
+          bufferedColor: Colors.white24,
+          backgroundColor: Colors.white12,
+        ),
+        placeholder: const Center(
+          child: CircularProgressIndicator(color: AppColors.purple),
+        ),
+        errorBuilder: (context, errorMessage) {
+          return Center(
+            child: Text(
+              errorMessage,
+              style: const TextStyle(color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
+          );
+        },
+      );
+
+      setState(() {
+        _videoController = controller;
+        _chewieController = chewie;
+        _loading = false;
       });
     } catch (_) {
       if (!_disposed && mounted) _onError();
     }
+  }
+
+  Future<void> _disposePlayers() async {
+    _chewieController?.dispose();
+    _chewieController = null;
+    await _videoController?.dispose();
+    _videoController = null;
   }
 
   void _onError() {
@@ -140,14 +148,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await _start();
   }
 
-  Future<void> _togglePlay() async {
-    await _player.playOrPause();
-  }
-
   @override
   void dispose() {
     _disposed = true;
-    _player.dispose();
+    _chewieController?.dispose();
+    _videoController?.dispose();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.landscapeLeft,
@@ -164,13 +169,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            if (_error == null)
+            if (_chewieController != null && _error == null)
               Positioned.fill(
-                child: Video(
-                  controller: _videoController,
-                  controls: NoVideoControls,
-                  fill: Colors.black,
-                ),
+                child: Chewie(controller: _chewieController!),
               ),
             if (_loading)
               const Center(
@@ -230,13 +231,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        _isPlaying ? Icons.pause : Icons.play_arrow,
-                        color: Colors.white,
-                      ),
-                      onPressed: _togglePlay,
                     ),
                     IconButton(
                       icon: Icon(
